@@ -1,3 +1,11 @@
+simple-genetic-algorithm-mr
+===========================
+
+This is a simple fork of simple-genetic-algorithm, using MonadRandom instead of manually threading the random generator, for convenience.
+
+The readme for simple-genetic-algorithm is below:
+
+
 simple-genetic-algorithm
 ========================
 
@@ -47,7 +55,7 @@ instance Chromosome SinInt where
         let max_err = 1000.0 in
         max_err - (min (err int) max_err)
 
-randomSinInt gen = 
+randomSinInt gen =
     let (lst, gen') =
             L.foldl'
                 (\(xs, g) _ -> let (x, g') = randomR (-10.0,10.0) g in (x:xs,g') )

@@ -60,7 +60,7 @@ module AI.GeneticAlgorithm.Simple (
     runGA,
     runGAIO,
     zeroGeneration,
-    nextGeneration, roulette
+    nextGeneration
   ) where
 
 import System.Random
@@ -131,12 +131,15 @@ runGAIO' pop ps mp stopf gnum = do
             runGAIO' pop' ps mp stopf (gnum+1)
 
 -- | Generate zero generation. Use this function only if you are going to implement your own runGA.
-zeroGeneration  :: (Monad m,RandomGen g)
+zeroGeneration  :: (Monad m,RandomGen g, Chromosome a)
                 => RandT g m a         -- ^ Random chromosome generator (hint: use closures)
                 -> Int                 -- ^ Population size
                 -> RandT g m [a]       -- ^ Zero generation
-zeroGeneration rnd ps =
-    replicateM ps rnd
+zeroGeneration rnd ps = do
+    zp <- replicateM ps rnd
+    let pF  = map (\p->(p,fitness p)) zp
+        lst = take ps $ L.sortBy (\(_, fx) (_, fy) -> fy `compare` fx) pF
+    return $ map fst lst
 
 -- | Generate next generation (in parallel) using mutation and crossover.
 --   Use this function only if you are going to implement your own runGA.
@@ -150,9 +153,9 @@ nextGeneration pop ps mp = do
     let gens = L.unfoldr (Just . split) gen
         chunks = L.zip gens $ init $ L.tails pop
         results = map (\(g, x : ys) -> [ (t,fitness t) | t <- evalRand (nextGeneration' [ (x, y) | y <- ys ] mp []) g ]) chunks
-                    `using` parList rdeepseq
-    -- r <- roulette ps $ normalize $ concat results
-    -- return $ map fst $ L.sortBy (\(_, fx) (_, fy) -> fy `compare` fx) r
+                    `using` evalList rdeepseq
+--    r <- roulette ps $ normalize $ concat results
+--    return $ map fst $ L.sortBy (\(_, fx) (_, fy) -> fy `compare` fx) r
     let lst = take ps $ L.sortBy (\(_, fx) (_, fy) -> fy `compare` fx) $ concat results
     return $ map fst lst
 
@@ -188,15 +191,6 @@ roulette l xs = do
     go (xs0,xsaccum) _ = do
       (xs1,xs2) <- fromList' xs0
       return (xs2,xs1:xsaccum)
---  let s = (sum (map snd xs)) -- total weight
---      cs = scanl1 (\(_,q) (y,s') -> (y, s'+q)) xs       -- cumulative weight
---  sequence $ replicate l (select1 s cs)
---  where
---    select1 s cs= do
---        p <- getRandomR (0.0,s)
---        let l1 = takeWhile (\(_,q) -> q < p) cs
---        let (r:l2) = drop (length l1) cs
---        return (r,l1++l2)
 
 fromList' :: (MonadRandom m) => [(a,Double)] -> m ((a,Double),[(a,Double)])
 fromList' [] = error "fromList' called with empty list"

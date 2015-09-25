@@ -65,12 +65,14 @@ module AI.GeneticAlgorithm.Simple (
 
 import System.Random
 import qualified Data.List as L
+import Data.Ord
 import Control.Parallel.Strategies
 
 import Control.Monad.Random
 import Control.Monad
 import Control.Monad.IO.Class (liftIO)
 
+import Debug.Trace
 
 -- | Chromosome interface
 class NFData a => Chromosome a where
@@ -89,7 +91,7 @@ runGA   :: (RandomGen g, Chromosome a)
         -> Int                      -- ^ Population size
         -> Double                   -- ^ Mutation probability [0, 1]
         -> Rand g a                 -- ^ Random chromosome generator (hint: use currying or closures)
-        -> (a -> Int -> Bool)       -- ^ Stopping criteria, 1st arg - best chromosome, 2nd arg - generation number
+        -> ((a,Double) -> Int -> Bool)       -- ^ Stopping criteria, 1st arg - best chromosome/fitness, 2nd arg - generation number
         -> a                        -- ^ Best chromosome
 runGA gen ps mp rnd stopf = evalRand go gen
   where
@@ -100,7 +102,7 @@ runGA gen ps mp rnd stopf = evalRand go gen
 runGA' pop ps mp stopf gnum = do
     let best = head pop
     if stopf best gnum
-        then return best
+        then return $ fst best
         else do
             pop' <- nextGeneration pop ps mp
             runGA' pop' ps mp stopf (gnum+1)
@@ -110,7 +112,7 @@ runGAIO :: Chromosome a
         => Int                      -- ^ Population size
         -> Double                   -- ^ Mutation probability [0, 1]
         -> RandT StdGen IO a        -- ^ Random chromosome generator (hint: use currying or closures)
-        -> (a -> Int -> IO Bool)    -- ^ Stopping criteria, 1st arg - best chromosome, 2nd arg - generation number
+        -> ((a,Double) -> Int -> IO Bool)    -- ^ Stopping criteria, 1st arg - best chromosome, 2nd arg - generation number
         -> IO a                     -- ^ Best chromosome
 runGAIO ps mp rnd stopf = do
   gen <- getStdGen
@@ -120,12 +122,12 @@ runGAIO ps mp rnd stopf = do
       pop <- zeroGeneration rnd ps
       runGAIO' pop ps mp stopf 0
 
-runGAIO' :: (RandomGen g, Chromosome a) => [a]  -> Int -> Double -> (a -> Int -> IO Bool) -> Int -> RandT g IO a
+runGAIO' :: (RandomGen g, Chromosome a) => [(a,Double)]  -> Int -> Double -> ((a,Double) -> Int -> IO Bool) -> Int -> RandT g IO a
 runGAIO' pop ps mp stopf gnum = do
-    let best = head pop
+    let best =  head pop
     stop <- liftIO $ stopf best gnum
     if stop
-        then return best
+        then return $ fst best
         else do
             pop' <- nextGeneration pop ps mp
             runGAIO' pop' ps mp stopf (gnum+1)
@@ -134,34 +136,55 @@ runGAIO' pop ps mp stopf gnum = do
 zeroGeneration  :: (Monad m,RandomGen g, Chromosome a)
                 => RandT g m a         -- ^ Random chromosome generator (hint: use closures)
                 -> Int                 -- ^ Population size
-                -> RandT g m [a]       -- ^ Zero generation
+                -> RandT g m [(a,Double)]       -- ^ Zero generation
 zeroGeneration rnd ps = do
     zp <- replicateM ps rnd
     let pF  = map (\p->(p,fitness p)) zp
         lst = take ps $ L.sortBy (\(_, fx) (_, fy) -> fy `compare` fx) pF
-    return $ map fst lst
+    return lst
 
 -- | Generate next generation (in parallel) using mutation and crossover.
 --   Use this function only if you are going to implement your own runGA.
 nextGeneration  :: (Monad m,RandomGen g, Chromosome a)
-                => [a]              -- ^ Current generation
+                => [(a,Double)]              -- ^ Current generation
                 -> Int              -- ^ Population size
                 -> Double           -- ^ Mutation probability
-                -> RandT g m [a]    -- ^ Next generation ordered by fitness (best - first)
+                -> RandT g m [(a,Double)]    -- ^ Next generation ordered by fitness (best - first)
 nextGeneration pop ps mp = do
     gen <- getSplit
-    let gens = L.unfoldr (Just . split) gen
+    let gens = take (ps `div` 2) $ L.unfoldr (Just . split) gen
+--        bests = take (ps `div` 10) pop
         chunks = L.zip gens $ init $ L.tails pop
-        results = map (\(g, x : ys) -> [ (t,fitness t) | t <- evalRand (nextGeneration' [ (x, y) | y <- ys ] mp []) g ]) chunks
-                    `using` evalList rdeepseq
+--        results = map (\(g, x : ys) -> [ (t,fitness t) | t <- evalRand (nextGeneration' [ (x, y) | y <- ys ] mp []) g ]) chunks
+--                    `using` evalList rdeepseq
+        results = map (\g-> [ (t,fitness t) | t <- evalRand (tournament pop mp ps) g]) gens
+                     `using` evalList rdeepseq
 --    r <- roulette ps $ normalize $ concat results
 --    return $ map fst $ L.sortBy (\(_, fx) (_, fy) -> fy `compare` fx) r
-    let lst = take ps $ L.sortBy (\(_, fx) (_, fy) -> fy `compare` fx) $ concat results
-    return $ map fst lst
+        allResults = concat results
+    let lst = take ps $ L.sortBy (\(_, fx) (_, fy) -> fy `compare` fx) allResults
+    return lst
+
+tournament :: (RandomGen g, Chromosome a) => [(a,Double)] -> Double -> Int ->  Rand g [a]
+tournament pop mp ps = do
+    tmt <- uniformM 3 pop
+    let (p1:p2:_) = L.sortBy (comparing $ (Down . snd)) tmt
+    --(p1,rs) <- fromList' tmt
+    --(p2,_) <- fromList' rs
+    children0 <- crossover (fst p1) (fst p2)
+    mapM (`mutate` mp) children0
+
+uniformM :: (MonadRandom m) =>  Int -> [(a,Double)] -> m [(a,Double)]
+uniformM sz ls = fst <$> foldM go ([],zip ls $ repeat 1) [1..sz]
+    where go (acc,l) _=
+            do
+                ((sel,_),l2) <- fromList' l
+                return (sel:acc,l2)
+    --replicateM sz (uniform ls)
 
 nextGeneration' [] _ acc = return acc
 nextGeneration' ((p1,p2):ps) mp acc = do
-    children0 <- crossover p1 p2
+    children0 <- crossover (fst p1) (fst p2)
     children1 <- mapM (`mutate` mp) children0
     nextGeneration' ps mp (children1 ++ acc)
 

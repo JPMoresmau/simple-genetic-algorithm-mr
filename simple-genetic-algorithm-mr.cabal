@@ -19,7 +19,7 @@ source-repository head
 
 library
   exposed-modules:     AI.GeneticAlgorithm.Simple
-  ghc-options:         -O2 -Wall
+  ghc-options:         -O2 -Wall -fprof-auto
   build-depends:
                        base >=4.5 && < 5,
                        random >= 1.0,

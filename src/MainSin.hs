@@ -44,8 +44,8 @@ randomSinInt = do
     lst <- replicateM polynomialOrder (getRandomR (-10.0,10.0))
     return $ SinInt lst
 
-stopf :: SinInt -> Int -> IO Bool
-stopf best gnum = do
+stopf :: (SinInt,Double) -> Int -> IO Bool
+stopf (best,_) gnum = do
     let e = err best
     _ <- printf "Generation: %02d, Error: %.8f\n" gnum e
     return $ e < 0.0002 || gnum > 20
